@@ -39,19 +39,8 @@ psql -U postgres -d campus_event_finder -f schema.sql
 psql -U postgres -d campus_event_finder -f sample_data.sql
 ```
 
-### 4. Environment variables
 
-Create a `.env` file with your database credentials:
-
-```env
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=campus_event_finder
-DB_USER=postgres
-DB_PASSWORD=your_password   # omit if not required
-```
-
-### 5. Start the CLI
+### 4. Start the CLI
 
 ```bash
 npm run cli

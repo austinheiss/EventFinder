@@ -2,11 +2,9 @@
 
 import inquirer from 'inquirer';
 import pg from 'pg';
-import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
 import { format } from 'date-fns';
 
-dotenv.config();
 const { Pool } = pg;
 const pool = new Pool({
   host: process.env.DB_HOST || 'localhost',
@@ -82,7 +80,7 @@ async function listEvents() {
     JOIN category c ON e.category_id = c.category_id
     JOIN venue v ON e.venue_id = v.venue_id
     WHERE e.event_datetime > CURRENT_TIMESTAMP AND e.is_active = TRUE
-    ORDER BY e.event_datetime ASC
+    ORDER BY e.event_datetime ASC, e.title ASC
   `);
   if (res.rowCount === 0) {
     console.log('\n(No upcoming events)');
