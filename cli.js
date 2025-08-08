@@ -31,6 +31,7 @@ async function registerUser() {
   ]);
 
   const { first_name, last_name, username, email, password } = answers;
+  // Check if a user with this username or email already exists
   const existing = await pool.query(
     'SELECT 1 FROM user_account WHERE username=$1 OR email=$2',
     [username, email]
@@ -40,6 +41,7 @@ async function registerUser() {
     return null;
   }
   const password_hash = await bcrypt.hash(password, 10);
+  // Create a new user and return the generated user_id and first_name
   const res = await pool.query(
     `INSERT INTO user_account (username, email, first_name, last_name, password_hash)
      VALUES ($1,$2,$3,$4,$5) RETURNING user_id, first_name`,
@@ -54,6 +56,7 @@ async function loginUser() {
     { name: 'email', message: 'Email:', validate: emailValid('Invalid email') },
     { type: 'password', name: 'password', message: 'Password:', mask: '*', validate: notEmpty('Password is required') },
   ]);
+  // Look up the user by email to retrieve hashed password and name
   const res = await pool.query(
     'SELECT user_id, password_hash, first_name FROM user_account WHERE email=$1',
     [answers.email]
@@ -73,6 +76,7 @@ async function loginUser() {
 }
 
 async function listEvents() {
+  // List all upcoming, active events with their category and venue, ordered by date then title
   const res = await pool.query(`
     SELECT e.event_id, e.title, e.event_datetime, c.name AS category, v.name AS venue,
            e.current_attendees, e.max_attendees
@@ -96,6 +100,7 @@ async function listEvents() {
 
 // Helper to choose or create a category
 async function chooseCategory() {
+  // Load all categories to present as choices
   let res = await pool.query('SELECT category_id, name FROM category ORDER BY name');
   let choices = res.rows.map(r => ({ name: r.name, value: r.category_id }));
   choices.push({ name: '<Create new category>', value: '__new__' });
@@ -106,6 +111,7 @@ async function chooseCategory() {
       { name: 'name', message: 'New category name:', validate: notEmpty('Name required') },
       { name: 'description', message: 'Description (optional):' },
     ]);
+    // Create a new category and return its id
     const ins = await pool.query('INSERT INTO category (name, description) VALUES ($1,$2) RETURNING category_id', [name, description || null]);
     return ins.rows[0].category_id;
   }
@@ -114,6 +120,7 @@ async function chooseCategory() {
 
 // Helper to choose or create a venue
 async function chooseVenue() {
+  // Load all venues to present as choices
   let res = await pool.query('SELECT venue_id, name FROM venue ORDER BY name');
   let choices = res.rows.map(r => ({ name: r.name, value: r.venue_id }));
   choices.push({ name: '<Create new venue>', value: '__new__' });
@@ -126,6 +133,7 @@ async function chooseVenue() {
       { name: 'capacity', message: 'Capacity (blank for none):', validate: positiveIntOpt('Enter positive integer or blank') },
       { name: 'description', message: 'Description (optional):' },
     ]);
+    // Create a new venue and return its id
     const ins = await pool.query('INSERT INTO venue (name, address, capacity, description) VALUES ($1,$2,$3,$4) RETURNING venue_id', [
       answers.name,
       answers.address || null,
@@ -156,6 +164,7 @@ async function createEvent(loggedIn) {
     registration_deadline,
     is_public,
   } = answers;
+  // Create a new event owned by the logged in user and return its id
   const res = await pool.query(
     `INSERT INTO event (title, description, event_datetime, venue_id, category_id, organizer_id, max_attendees, registration_deadline, is_public)
      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING event_id`,
@@ -179,13 +188,15 @@ async function joinOrLeaveEvent(loggedIn, action) {
   const { event_id } = await inquirer.prompt({ name: 'event_id', message: `${action} which event id?`, validate: positiveInt('Enter event id') });
   const client = await pool.connect();
   try {
+    // Start a transaction to keep user and event changes consistent
     await client.query('BEGIN');
-    // ensure array exists (COALESCE)
+    // Ensure the attendee list array exists for this user (COALESCE)
     await client.query(
       `UPDATE user_account SET attended_event_ids = COALESCE(attended_event_ids, '{}') WHERE user_id=$1`,
       [loggedIn.user_id]
     );
     if (action === 'Join') {
+      // Lock the event row and read capacity/deadline to validate join
       const evtRes = await client.query(
         'SELECT max_attendees, current_attendees, event_datetime, registration_deadline FROM event WHERE event_id=$1 FOR UPDATE',
         [event_id]
@@ -195,20 +206,24 @@ async function joinOrLeaveEvent(loggedIn, action) {
       if (evt.registration_deadline && new Date(evt.registration_deadline) <= new Date()) throw new Error('Deadline passed');
       if (new Date(evt.event_datetime) <= new Date()) throw new Error('Event occurred');
       if (evt.max_attendees && evt.current_attendees >= evt.max_attendees) throw new Error('Full');
+      // Add the event id to the user's attended_event_ids only if not already present
       const addRes = await client.query(
         `UPDATE user_account SET attended_event_ids = attended_event_ids || $2::int WHERE user_id=$1 AND NOT attended_event_ids @> ARRAY[$2]::int[]`,
         [loggedIn.user_id, event_id]
       );
       if (addRes.rowCount === 0) throw new Error('Already joined');
+      // Increment the event's attendee count
       await client.query('UPDATE event SET current_attendees = current_attendees + 1 WHERE event_id=$1', [event_id]);
       await client.query('COMMIT');
       console.log('\n✅ Joined event');
     } else {
+      // Remove the event id from the user's attended_event_ids array
       const removeRes = await client.query(
         `UPDATE user_account SET attended_event_ids = array_remove(attended_event_ids, $2::int) WHERE user_id=$1 RETURNING attended_event_ids`,
         [loggedIn.user_id, event_id]
       );
       if (removeRes.rowCount === 0) throw new Error('Not attending');
+      // Decrement attendee count, not going below zero
       await client.query('UPDATE event SET current_attendees = GREATEST(current_attendees-1,0) WHERE event_id=$1', [event_id]);
       await client.query('COMMIT');
       console.log('\n✅ Left event');
