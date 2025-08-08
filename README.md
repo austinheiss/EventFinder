@@ -54,3 +54,5 @@ Follow the interactive prompts to register, log in, and start interacting with t
 - PostgreSQL ≥ 12
 
 ---
+
+Created with the assistance of AI tools.
